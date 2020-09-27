@@ -4,6 +4,8 @@
 // - output transistor for ultra bright LED's (3)
 // - proximity sensor KTIR0711S
 // - WS2812B 24 diodes (circle)
+// Purpose: testing reactions on different cups, how works DS18B20, how much current draws led strip and how accurate is proximity detector.
+// In preparation: software for one user and one cup, proper detecting of peak teperature, best effects displaed by led strip.
 
 
 #include <Adafruit_NeoPixel.h> //Dołączenie biblioteki
