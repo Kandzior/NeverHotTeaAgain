@@ -24,6 +24,7 @@ int device_state = 0;
 void RGB_blue(int PWM);
 void RGB_red(int PWM);
 void RGB_green(int PWM);
+void RGB_off(void);
 void RGB_effect_1 (int PWM, int speed_RGB);
 
 // there an be few users / few different cups
@@ -116,11 +117,19 @@ void loop() {
   {
     case 0:   // cup is not present, wait till the cup will be on place
       if (analogRead(czujnik) < user1data.cup_height) device_state = 1;
+      
       else delay(100);
       break;
-    case 1:   // cup is on, waiting till the temperature will fall
+    case 1:   // cup is on, waiting till the temperature will fall 
       analogWrite(led_pin, user1data.PWM_5mm);
-      
+      if (analogRead(czujnik) > 1000) { device_state = 0; RGB_off(); analogWrite(led_pin, 0);}
+      else
+      {
+        sensors.requestTemperatures(); //Pobranie temperatury czujnika
+        if (sensors.getTempCByIndex(0) >35) RGB_red(200);
+          else RGB_green(200);
+        delay(1000);
+      }
       break;
     case 2:   // Cup is present. White leds are on. Device starts to shine - waits until themperature stops to rise. LED RGB is circling.
       break;
@@ -158,6 +167,13 @@ void RGB_green(int PWM)
   for (int k = 0; k< 24; k++) linijka.setPixelColor(j++, 0, 255, 0);  // r, g, b
   linijka.show();
 }
+
+void RGB_off(void)
+{
+  for (int k = 0; k< 24; k++) linijka.setPixelColor(j++, 0, 0, 0);  // r, g, b
+  linijka.show();
+}
+
 void RGB_effect_1 (int PWM, int speed_RGB)    // todo
 {
   ;
