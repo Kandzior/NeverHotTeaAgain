@@ -36,13 +36,27 @@ void RGB_effect_1 (int PWM, int speed_RGB);
 
 struct userDataStruct {
   int cup_height;
-  int treshold_temperature;
+  float treshold_temperature;
   char transparency;
   int PWM_RGB;
   int PWM_5mm;
 } user1data;
+
+
+
 userDataStruct user2data;
 userDataStruct user3data;
+
+// programming the device for now should be done manually. If you want to do that, connect Arduino to USB,
+// turn on the serial monitor and watch the displayed values - temperature and distance. Prepare your drink, put it on the device,
+// write the distance and watch the tepmerture rise and wait till it start falling. When the drink is cold enuogh, write down 
+// the temperature and go back to code. Remember - if you want to do that correctly, it will be better to to dhat in two steps:
+// first - make a hot drink, check when it's good (measure time)
+// second - put the drink on the device and measure temperature, when you'll take the drink away after measured time,
+// if you'll do that few times, the temperature will not be correct
+// if you want to enter programming mode - write PROGRAMMING: 1, else - write 0
+#define PROGRAMMING 1
+
 
 
 OneWire oneWire(2); //Podłączenie do A5
@@ -60,76 +74,91 @@ void setup() {
   linijka.begin(); //Inicjalizacja
 
   Serial.begin(9600);        //inicjalizacja monitora szeregowego
-  Serial.println("Test czujnika odbiciowego"); 
+  Serial.println("Start of device..."); 
 
-    sensors.begin(); //Inicjalizacja czujnikow
+  sensors.begin(); //Inicjalizacja czujnikow
 }
 
 int j=0;
 int l=0;
+float temp_previous=0, temp_actuall;
 
 void loop() {
-  //Fading the LED - testing the components
 
-  //for (int k = 0; k< 24; k++) linijka.setPixelColor(j++, 0, 0, 0);  // r, g, b
-  
-  for(int i=0; i<255; i++){
-    analogWrite(led_pin, i);
-    delay(20);
-  }
-  for(int i=255; i>0; i--){
-    analogWrite(led_pin, i);
-    delay(20);
-  }
-  int odl = analogRead(czujnik);      //odczytanie wartości z czujnika
-  //Serial.println(odl);                //wyświetlenie jej na monitorze
-
-  for (int k = 0; k< 24; k++) linijka.setPixelColor(j++, 0, 255, 0);  // r, g, b
-  linijka.show();
-  analogWrite(led_pin, 255);
-  delay(5000);
-  j=0;
-  //linijka.clear();
-
-  for (int k = 0; k< 24; k++) linijka.setPixelColor(j++, 0, 255, 0);  // r, g, b
-  linijka.show();
-  analogWrite(led_pin, 255);
-  delay(5000);
-  j=0;
-  //linijka.clear();
-
-  for (int k = 0; k< 24; k++) linijka.setPixelColor(j++, 0, 255, 0);  // r, g, b
-  linijka.show();
-  analogWrite(led_pin, 255);
-  delay(5000);
-  j=0;
-  //linijka.clear();
-
+  // programming mode or normal mode
+  while(PROGRAMMING == 1)
+  {
+    // display distance 0-1024
+    int odl = analogRead(czujnik);      //odczytanie wartości z czujnika
+    Serial.println(odl);                //wyświetlenie jej na monitorze
+    
+    // display temperature
     sensors.requestTemperatures(); //Pobranie temperatury czujnika
-  Serial.print("Pierwszy: ");
-  Serial.println(sensors.getTempCByIndex(0));  //Wyswietlenie informacji
-  Serial.print("Drugi: ");
-  Serial.println(sensors.getTempCByIndex(1));  //Wyswietlenie informacji
-  Serial.print("Trzeci: ");
-  Serial.println(sensors.getTempCByIndex(2));  //Wyswietlenie informacji
-  delay(5000);
+    Serial.print("Pierwszy: ");
+    Serial.println(sensors.getTempCByIndex(0));  //Wyswietlenie informacji
+
+    // auxiliary sensor - for monitoring battery temoperature - optional, not needed, for future use
+    Serial.print("Drugi: ");
+    Serial.println(sensors.getTempCByIndex(1));  //Wyswietlenie informacji
+
+    // setting the PWM of white diodes to 50%
+    analogWrite(led_pin, 127);
+
+    // setting the color of 24LED strip to GREEN
+    for (int k = 0; k< 24; k++) linijka.setPixelColor(j++, 0, 255, 0);  // r, g, b
+    linijka.show();
+    delay(5000);
+  }
+  
+  // normal mode (PROGRAMMING == 0)
+  while(1)
+  switch(device_state)
+  {
+    case 0:   // cup is not present, wait till the cup will be on place
+      if (analogRead(czujnik) < user1data.cup_height) device_state = 1;
+      else delay(100);
+      break;
+    case 1:   // cup is on, waiting till the temperature will fall
+      analogWrite(led_pin, user1data.PWM_5mm);
+      
+      break;
+    case 2:   // Cup is present. White leds are on. Device starts to shine - waits until themperature stops to rise. LED RGB is circling.
+      break;
+    case 3:   // Cup is present. Device detects peak of temperture rise. LED RGB starts shining RED.
+      break;
+    case 4:   // Cup is present. Temperture falled to USER_TEMPERATURE. LED RGB switches to GREEN.
+      break;
+    case 5:   // Cup is present. Device waits till user takes off the cup. Measures temperture, whet it reaches room temperture, LED is BLUE.
+      break;
+    case 6:   // Cup is taken away. LEDs turning off.
+      break;
+    case 7:   // Cup is back. White leds is ON. RGB dimm to minimum and are GREEN until temperture reaches room temp, than go BLUE.
+      break;
+    default:
+      break; 
+  }
+
 
 
 }
 
 void RGB_blue(int PWM)
 {
+  for (int k = 0; k< 24; k++) linijka.setPixelColor(j++, 0, 0, 255);  // r, g, b
+  linijka.show();
   ;
 }
 void RGB_red(int PWM)
 {
-  ;
+  for (int k = 0; k< 24; k++) linijka.setPixelColor(j++, 255, 0, 0);  // r, g, b
+  linijka.show();
 }
 void RGB_green(int PWM)
 {
-  ;
+  for (int k = 0; k< 24; k++) linijka.setPixelColor(j++, 0, 255, 0);  // r, g, b
+  linijka.show();
 }
-void RGB_effect_1 (int PWM, int speed_RGB)
+void RGB_effect_1 (int PWM, int speed_RGB)    // todo
 {
   ;
 }
