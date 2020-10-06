@@ -11,12 +11,23 @@
 // Purpose: testing reactions on different cups, how works DS18B20, how much current draws led strip and how accurate is proximity detector.
 // In preparation: software for one user and one cup, proper detecting of peak teperature, best effects displaed by led strip.
 
+/* Device will work like state machine. There will be few states:
+ *  1. Cup is not present.Everything is turned off. Only sesnor measures distance from infinite to 0.
+ *  2. Cup is present. White leds are on. Device starts to shine - waits until themperature stops to rise. LED RGB is circling.
+ *  3. Cup is present. Device detects peak of temperture rise. LED RGB starts shining RED.
+ *  4. Cup is present. Temperture falled to USER_TEMPERATURE. LED RGB switches to GREEN.
+ *  5. Cup is present. Device waits till user takes off the cup. Measures temperture, whet it reaches room temperture, LED is BLUE.
+ *  6. Cup is taken away. LEDs turning off. 
+ *  7. Cup is back. White leds is ON. RGB dimm to minimum and are GREEN until temperture reaches room temp, than go BLUE. * 
+ */
 int device_state = 0;
 void RGB_blue(int PWM);
+void RGB_blue_circling(int PWM, int start_pos);
 void RGB_red(int PWM);
 void RGB_green(int PWM);
 void RGB_off(void);
 void RGB_effect_1 (int PWM, int speed_RGB);
+int CheckCup(void);
 
 // there an be few users / few different cups
 // each user should have his own presets:
@@ -25,6 +36,9 @@ void RGB_effect_1 (int PWM, int speed_RGB);
 // - info about transparency of the cup - if the cup isn't transparent there is noo need to flash 5mm leds from bottom
 // - PWM of 5mm leds
 // - PWM of leds (RGB)
+
+// Conception changed - to less complicated. State machine will be soon. Now it's three four state: 
+// cup is out/ cup is on --> temp too high, temp ok, temp too low
 
 //struct userDataStruct {
 //  int cup_height;
@@ -36,8 +50,12 @@ void RGB_effect_1 (int PWM, int speed_RGB);
 //userDataStruct user2data;
 //userDataStruct user3data;
 
-// Conception changed - to less complicated. State machine will be soon. Now it's three four state: 
-// cup is out/ cup is on --> temp too high, temp ok, temp too low
+
+int NumberOfCups = 2; // number of cups defined is project
+int Cup[10][2];
+
+float TempCup[10][2]; // Temp from red to green, temp from green to blue
+
 // preprogrammed values - for nowe for only one type of cup
 float temp_treshold = 35.5;   // temperature, when color changes from red to green (during falling)
 float temp_cold = 28.0;       // below that tamperature RGB goes blue
@@ -71,15 +89,24 @@ void setup() {
   Serial.println("Start of device..."); 
 
   sensors.begin(); //Inicjalizacja czujnikow
+
+  // definition of cup's (distance sensor)
+Cup[0][0]= 48; Cup[0][1] = 58;  // definition of Cup No 0 - between number 1 and 2
+Cup[1][0]= 73; Cup[1][1] = 100; // definition of cup No 2
+// definition of temperatures
+TempCup[0][0] = 35; TempCup[0][1] = 30;   // first - threshold to green from red, second - from green to blue
+TempCup[1][0] = 32; TempCup[1][1] = 29;
 }
 
 int j=0;
 int l=0;
 float temp_previous=0, temp_actuall;
+int previous_cup_number = 100, cup_number=100;
+int internat_effect_counter = 0;
 
 void loop() {
 
-  // programming mode or normal mode - only for future use
+  // programming mode or normal mode
   while(PROGRAMMING == 1)
   {
     // display distance 0-1024
@@ -108,67 +135,41 @@ void loop() {
   // normal mode (PROGRAMMING == 0)
   while(1)
   {
-    // when dst sensor is below 1000, turn on the WHITE LED
-    if (analogRead(czujnik) < 1000 ) 
-      {
-        analogWrite(led_pin, 127); // setting the PWM of white diodes to 50
-        // check temperature...
-        temp = sensors.getTempCByIndex(0);
-        Serial.println(temp);
-        if (temp > temp_treshold)
-        {
-          RGB_red(127); Serial.println("RED,127");
-        }
-        else
-        {
-          if (temp > temp_cold) {RGB_green(127); Serial.println("GREEN,127");}
-          else {RGB_blue(127); Serial.println("BLUE,127");}
-        }
-        sensors.requestTemperatures();
-        delay(2000);
-      }
+    // checking cup presence
+    cup_number = CheckCup();
+    if (cup_number <10 && previous_cup_number == 100)   // befor was nothing putted on the top - start the LED's WHITE
+    {
+      sensors.requestTemperatures();
+      for (int i = 0; i<255; i++) {analogWrite(led_pin, i); delay(10);}
+      previous_cup_number = cup_number;
+    }
+    if (cup_number == 100 && previous_cup_number != 100)
+    {
+      for (int i = 0; i<255; i++) {analogWrite(led_pin, 254-i); delay(7);}
+      previous_cup_number = cup_number;
+      RGB_blue(1);
+    }
+    Serial.print(cup_number); Serial.print(", ");
+    Serial.println(analogRead(czujnik));
+    if (cup_number != 100) 
+    {
+      temp_actuall = sensors.getTempCByIndex(0); Serial.println(temp_actuall); sensors.requestTemperatures();
+      if (temp_actuall < TempCup[cup_number][1]) {RGB_blue_circling(100, internat_effect_counter++); if(internat_effect_counter>23) internat_effect_counter=0;}
       else
       {
-        // standby - blue, PWM 1/256
-        RGB_blue(1); Serial.println("BLUE,3");
-        analogWrite(led_pin, 0);
-        sensors.requestTemperatures();
-        delay(2000);
+        if(temp_actuall > TempCup[cup_number][0]) RGB_red(64);
+        else
+        {
+          RGB_green(64);
+        }
       }
+      
+    }
+    delay(10);
+    
+
   }
-//  switch(device_state)
-//  {
-//    case 0:   // cup is not present, wait till the cup will be on place
-//      if (analogRead(czujnik) < user1data.cup_height) device_state = 1;
-//      
-//      else delay(100);
-//      break;
-//    case 1:   // cup is on, waiting till the temperature will fall 
-//      analogWrite(led_pin, user1data.PWM_5mm);
-//      if (analogRead(czujnik) > 1000) { device_state = 0; RGB_off(); analogWrite(led_pin, 0);}
-//      else
-//      {
-//        sensors.requestTemperatures(); //Pobranie temperatury czujnika
-//        if (sensors.getTempCByIndex(0) >35) RGB_red(200);
-//          else RGB_green(200);
-//        delay(1000);
-//      }
-//      break;
-//    case 2:   // Cup is present. White leds are on. Device starts to shine - waits until themperature stops to rise. LED RGB is circling.
-//      break;
-//    case 3:   // Cup is present. Device detects peak of temperture rise. LED RGB starts shining RED.
-//      break;
-//    case 4:   // Cup is present. Temperture falled to USER_TEMPERATURE. LED RGB switches to GREEN.
-//      break;
-//    case 5:   // Cup is present. Device waits till user takes off the cup. Measures temperture, whet it reaches room temperture, LED is BLUE.
-//      break;
-//    case 6:   // Cup is taken away. LEDs turning off.
-//      break;
-//    case 7:   // Cup is back. White leds is ON. RGB dimm to minimum and are GREEN until temperture reaches room temp, than go BLUE.
-//      break;
-//    default:
-//      break; 
-//  }
+
 
 
 
@@ -178,6 +179,23 @@ void RGB_blue(int PWM)
 {
   j=0;
   for (int k = 0; k< 24; k++) linijka.setPixelColor(j++, 0, 0, PWM);  // r, g, b
+  linijka.show();
+  ;
+}
+void RGB_blue_circling(int PWM, int start_pos)
+{
+  int TAB[24];
+    
+    
+  for (int k = 0; k<24;k++) 
+  {
+    
+    if ((start_pos - k) < 0) TAB[24+start_pos-k] = PWM;
+    else TAB[start_pos-k] = PWM;
+    PWM = PWM/2;
+  }
+  j=0;
+  for (int k = 0; k< 24; k++) linijka.setPixelColor(j++, 0, 0, TAB[j]);  // r, g, b
   linijka.show();
   ;
 }
@@ -206,12 +224,15 @@ void RGB_effect_1 (int PWM, int speed_RGB)    // todo
   ;
 }
 
-/* In the near future: Device will work like state machine. There will be few states:
- *  1. Cup is not present.Everything is turned off. Only sesnor measures distance from infinite to 0.
- *  2. Cup is present. White leds are on. Device starts to shine - waits until themperature stops to rise. LED RGB is circling.
- *  3. Cup is present. Device detects peak of temperture rise. LED RGB starts shining RED.
- *  4. Cup is present. Temperture falled to USER_TEMPERATURE. LED RGB switches to GREEN.
- *  5. Cup is present. Device waits till user takes off the cup. Measures temperture, whet it reaches room temperture, LED is BLUE.
- *  6. Cup is taken away. LEDs turning off. 
- *  7. Cup is back. White leds is ON. RGB dimm to minimum and are GREEN until temperture reaches room temp, than go BLUE. * 
- */
+// returns number of cup (first, second...) beginning from 0, no cup is outputed by 100
+int CheckCup(void)
+{
+  for (int i = 0; i< NumberOfCups; i++)
+  {
+    if ( analogRead(czujnik) > Cup[i][0] && analogRead(czujnik) < Cup[i][1]) 
+      { return (i);}  // returns number of cup
+  }
+  return (100);   // returns 100, if no cup was detected
+
+
+}
