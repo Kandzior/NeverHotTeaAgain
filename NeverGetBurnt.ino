@@ -236,3 +236,339 @@ int CheckCup(void)
 
 
 }
+
+
+
+
+#include <LiquidCrystal_PCF8574.h>
+#include <Wire.h>
+/*
+ * Prints readings like these to the Serial console:
+ *
+ * AQI 56  PM 1.0 = 16, PM 2.5 = 18, PM 4.0 = 21, PM 10.0 = 21
+ * AQI 55  PM 1.0 = 15, PM 2.5 = 17, PM 4.0 = 20, PM 10.0 = 20
+ * AQI 54  PM 1.0 = 14, PM 2.5 = 16, PM 4.0 = 18, PM 10.0 = 18
+ * etc.
+ */
+
+#define MIN 5       // granica przy której oczyszczacz się wyłącza
+#define HIST 3      // histereza
+#define DELAY 100     // ilość minut od ostatniego wwyłączenia oczysczacza
+
+#define PinA 2 
+#define PinB 3 
+ 
+unsigned long time = 0; 
+long ilosc_impulsow = 0; 
+long licznik = 0;
+
+#include <SoftwareSerial.h>
+
+SoftwareSerial hpmSerial(4,5);
+
+LiquidCrystal_PCF8574 lcd(0x27); // set the LCD address to 0x27 for a 16 chars and 2 line display
+
+
+char out = 0;
+char out_licznik = 5;
+char out_poprz = 0;
+
+// Arduino Due code for Honeywell HPMA115S0-XXX particle sensor
+// https://electronza.com/arduino-measuring-pm25-pm10-honeywell-hpma115s0/
+
+bool my_status;
+
+// IMPORTANT!!! We are working on an Arduino DUE, 
+// so int is 32 bit (-2,147,483,648 to 2,147,483,647)
+// For Arduino Uno int size is 8 bit, that is -32,768 to 32,767
+// Use long or float if working with an Uno or simmilar 8-bit board
+int  PM25;
+int  PM10;
+
+void(* resetFunc) (void) = 0;   // funckja resetująca Arduino za pomocą software
+
+void setup() {
+
+    int error;
+  Serial.begin(9600);
+  //while (!Serial);
+  hpmSerial.begin(9600);
+  pinMode(10, OUTPUT);    // sets the digital pin 13 as output
+
+    // See http://playground.arduino.cc/Main/I2cScanner how to test for a I2C device.
+  Wire.begin();
+  Wire.beginTransmission(0x27);
+  error = Wire.endTransmission();
+  lcd.begin(20, 2); // initialize the lcd
+  lcd.setBacklight(255);
+
+  if (error == 0) {
+    Serial.println(": LCD found.");
+    lcd.setCursor(0, 0); lcd.print("LCD init     ");
+  }
+  
+  delay(500); Serial.print("-----  ");
+
+lcd.setCursor(0, 0); lcd.print("Stop meas.      ");
+   my_status = stop_measurement();
+   delay(2000);
+
+  // Stop autosend
+  lcd.setCursor(0, 0); lcd.print("Stop autosend.      ");
+  my_status = stop_autosend(); 
+  // Serial print is used just for debugging
+  // But one can design a more complex code if desired
+  Serial.print("Stop autosend status is ");
+  Serial.println(my_status, BIN);
+  Serial.println(" ");
+  delay(2000);
+
+  lcd.setCursor(0, 0); lcd.print("Start meas.      ");
+   my_status = start_measurement();
+  // Serial print is used just for debugging
+  // But one can design a more complex code if desired
+  Serial.print("Start measurement status is ");
+  Serial.println(my_status, BIN);
+  Serial.println(" ");
+  delay(3000);
+
+//      if (my_status != 1) {
+////               /* Debug ...  */
+////               //lcd.setCursor(0, 0);  lcd.print("RESET Arduino za 2s  ");
+//               Serial.print("RESET Arduino za 2 s (HMPA nie odpowiada)");
+//               delay(500);
+//               resetFunc();
+//      }
+ pinMode(PinA,INPUT); 
+ pinMode(PinB,INPUT); 
+
+ //pinMode(7,INPUT);
+ 
+// attachInterrupt(0, blinkA, LOW); 
+// attachInterrupt(1, blinkB, LOW); 
+ 
+ time = millis(); 
+
+}
+
+void loop() {
+
+if (out) {digitalWrite(10, HIGH); digitalWrite(13, HIGH);}
+else {digitalWrite(10, LOW); digitalWrite(13, LOW);}
+
+  
+  lcd.setCursor(0, 0); lcd.print("PM25 PM10 STAT v:  *");
+  lcd.setCursor(0, 1); lcd.print("               h:   ");
+  // Read the particle data every minute
+  my_status = read_measurement(); 
+  // Serial print is used just for debugging
+  // But one can design a more complex code if desired
+  Serial.print("Read measurement status is ");
+  Serial.println(my_status, BIN);
+  Serial.print("PM2.5 value is ");
+  Serial.println(PM25, DEC);
+  Serial.print("PM10 value is ");
+  Serial.println(PM10, DEC);
+  Serial.println(" ");
+
+//Serial.println(my_status, BIN);
+lcd.setCursor(10, 1); lcd.print("  ");
+if (my_status)
+{lcd.setCursor(10, 1); lcd.print(" OK ");}
+else
+{lcd.setCursor(10, 1); lcd.print(" err");}
+
+lcd.setCursor(6, 1); lcd.print("     ");
+lcd.setCursor(1, 1); lcd.print("     ");
+
+if (my_status){
+lcd.setCursor(6, 1); lcd.print(PM10);
+lcd.setCursor(1, 1); lcd.print(PM25);
+}
+else
+{
+lcd.setCursor(6, 1); lcd.print("---");
+lcd.setCursor(1, 1); lcd.print("---");
+}
+//if (ilosc_impulsow < 0)
+//ilosc_impulsow = 0;
+//if (ilosc_impulsow >99)
+//ilosc_impulsow = 99;
+//
+//lcd.setCursor(17, 1); lcd.print(ilosc_impulsow);
+
+if (out_licznik > 0)
+out_licznik--;
+if (out_licznik == 0)
+{
+// sprawdzanie czy wlaczyc czy wylaczyc
+if (out == 0) 
+  if (PM25 > MIN + HIST) {out = 1; out_licznik = DELAY;} 
+if (out == 1)
+  if (PM25 < MIN) {out = 0; out_licznik = DELAY;}
+}
+if (out) {lcd.setCursor(19, 0); lcd.print("*");}
+else {lcd.setCursor(19, 0); lcd.print(" ");}
+
+if (out_licznik > 0)
+{lcd.setCursor(10, 0); lcd.print("    ");
+lcd.setCursor(11, 0); lcd.print(out_licznik,DEC);}
+else {lcd.setCursor(10, 0); lcd.print("STAT");}
+
+
+  delay(3000);
+
+}
+
+bool start_measurement(void)
+{
+  // First, we send the command
+  byte start_measurement[] = {0x68, 0x01, 0x01, 0x96 };
+  hpmSerial.write(start_measurement, sizeof(start_measurement));
+  //Then we wait for the response
+  while(hpmSerial.available() < 2);
+  char read1 = hpmSerial.read();
+  char read2 = hpmSerial.read();
+  // Test the response
+  if ((read1 == 0xA5) && (read2 == 0xA5)){
+    // ACK
+    return 1;
+  }
+  else if ((read1 == 0x96) && (read2 == 0x96))
+  {
+    // NACK
+    return 0;
+  }
+  else return 0;
+}
+
+bool stop_measurement(void)
+{
+  // First, we send the command
+  byte stop_measurement[] = {0x68, 0x01, 0x02, 0x95 };
+  hpmSerial.write(stop_measurement, sizeof(stop_measurement));
+  //Then we wait for the response
+  while(hpmSerial.available() < 2);
+  char read1 = hpmSerial.read();
+  char read2 = hpmSerial.read();
+  // Test the response
+  if ((read1 == 0xA5) && (read2 == 0xA5)){
+    // ACK
+    return 1;
+  }
+  else if ((read1 == 0x96) && (read2 == 0x96))
+  {
+    // NACK
+    return 0;
+  }
+  else return 0;
+}
+
+bool read_measurement (void)
+{
+  // Send the command 0x68 0x01 0x04 0x93
+  byte read_particle[] = {0x68, 0x01, 0x04, 0x93 };
+  hpmSerial.write(read_particle, sizeof(read_particle));
+  // A measurement can return 0X9696 for NACK
+  // Or can return eight bytes if successful
+  // We wait for the first two bytes
+  while(hpmSerial.available() < 1);
+  byte HEAD = hpmSerial.read();
+  while(hpmSerial.available() < 1);
+  byte LEN = hpmSerial.read();
+  // Test the response
+  if ((HEAD == 0x96) && (LEN == 0x96)){
+    // NACK
+    Serial.println("NACK");
+    return 0;
+  }
+  else if ((HEAD == 0x40) && (LEN == 0x05))
+  {
+    // The measuremet is valid, read the rest of the data 
+    // wait for the next byte
+    while(hpmSerial.available() < 1);
+    byte COMD = hpmSerial.read();
+    while(hpmSerial.available() < 1);
+    byte DF1 = hpmSerial.read(); 
+    while(hpmSerial.available() < 1);
+    byte DF2 = hpmSerial.read();     
+    while(hpmSerial.available() < 1);
+    byte DF3 = hpmSerial.read();   
+    while(hpmSerial.available() < 1);
+    byte DF4 = hpmSerial.read();     
+    while(hpmSerial.available() < 1);
+    byte CS = hpmSerial.read();      
+    // Now we shall verify the checksum
+    if (((0x10000 - HEAD - LEN - COMD - DF1 - DF2 - DF3 - DF4) % 0XFF) != CS){
+      Serial.println("Checksum fail");
+      return 0;
+    }
+    else
+    {
+      // Checksum OK, we compute PM2.5 and PM10 values
+      PM25 = DF1 * 256 + DF2;
+      PM10 = DF3 * 256 + DF4;
+      return 1;
+    }
+  }
+}
+
+bool stop_autosend(void)
+{
+ // Stop auto send
+  byte stop_autosend[] = {0x68, 0x01, 0x20, 0x77 };
+  hpmSerial.write(stop_autosend, sizeof(stop_autosend));
+  //Then we wait for the response
+  while(hpmSerial.available() < 2);
+  char read1 = hpmSerial.read();
+  char read2 = hpmSerial.read();
+  // Test the response
+  if ((read1 == 0xA5) && (read2 == 0xA5)){
+    // ACK
+    return 1;
+  }
+  else if ((read1 == 0x96) && (read2 == 0x96))
+  {
+    // NACK
+    return 0;
+  }
+  else return 0;
+}
+
+bool start_autosend(void)
+{
+ // Start auto send
+  byte start_autosend[] = {0x68, 0x01, 0x40, 0x57 };
+  hpmSerial.write(start_autosend, sizeof(start_autosend));
+  //Then we wait for the response
+  while(hpmSerial.available() < 2);
+  char read1 = hpmSerial.read();
+  char read2 = hpmSerial.read();
+  // Test the response
+  if ((read1 == 0xA5) && (read2 == 0xA5)){
+    // ACK
+    return 1;
+  }
+  else if ((read1 == 0x96) && (read2 == 0x96))
+  {
+    // NACK
+    return 0;
+  }
+  else return 0;
+}
+
+
+void blinkA()
+{
+ if ((millis() - time) > 3)
+ ilosc_impulsow++; 
+ time = millis();
+}
+ 
+void blinkB()
+{
+ if ((millis() - time) > 3) 
+ ilosc_impulsow-- ;
+ time = millis();
+}
+
